@@ -16,6 +16,25 @@ Whatever is chosen, the flow would be: on listing approval → upload cover phot
 
 ---
 
+## Browser Agent (Auto-List on eBay)
+
+Instead of (or in addition to) CSV export, build an agent that drives a real browser to create listings directly in eBay Seller Hub.
+
+Approach options:
+- **Playwright** — headless/headed Chromium automation; can reuse existing listing field data; handles local file upload for photos natively
+- **Claude computer-use** — Claude drives a browser via screenshot + action loop; more resilient to eBay UI changes
+- **Selenium** — older but widely supported alternative to Playwright
+
+Flow: approved listing → agent opens eBay "Create listing" form → fills title, category, price, condition, description, photos → submits.
+
+Considerations:
+- eBay UI changes frequently — CSS selectors will need maintenance
+- Need to handle login session / 2FA on first run (save session cookies)
+- Run headed on desktop for visibility; can switch to headless once stable
+- Photos require local file access — Playwright `set_input_files()` handles this
+
+---
+
 ## General
 
 - [ ] Bulk approve listings from the dashboard (select multiple → approve all)
