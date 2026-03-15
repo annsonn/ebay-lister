@@ -1,0 +1,31 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/db/ebaylister.db
+      - PHOTOS_DIR=/data/photos
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5vl:7b}
+      - EBAY_APP_ID=${EBAY_APP_ID:-}
+      - EBAY_CLIENT_SECRET=${EBAY_CLIENT_SECRET:-}
+      - SERVER_BASE_URL=${SERVER_BASE_URL:-http://localhost:8000}
+    volumes:
+      - ${NAS_PHOTOS_PATH:-./data/photos}:/data/photos
+      - ${NAS_DB_PATH:-./data/db}:/data/db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+networks:
+  default:
+    name: ebaylister
