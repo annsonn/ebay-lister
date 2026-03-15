@@ -7,6 +7,7 @@ export function CapturePage() {
   const [profiles, setProfiles] = useState([])
   const [selectedProfile, setSelectedProfile] = useState(null)
   const [label, setLabel] = useState('')
+  const [itemHint, setItemHint] = useState('')
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
   const [success, setSuccess] = useState(null)
@@ -39,6 +40,7 @@ export function CapturePage() {
     setError(null)
     const fd = new FormData()
     if (label) fd.append('label', label)
+    if (itemHint) fd.append('item_hint', itemHint)
     if (selectedProfile) fd.append('profile_id', selectedProfile.id)
     photos.forEach((p) => fd.append('photos', p))
     try {
@@ -46,6 +48,7 @@ export function CapturePage() {
       setSuccess(result)
       setPhotos([])
       setLabel('')
+      setItemHint('')
     } catch (e) {
       setError(e.message)
     } finally {
@@ -58,6 +61,7 @@ export function CapturePage() {
     setError(null)
     setPhotos([])
     setLabel('')
+    setItemHint('')
   }
 
   return (
@@ -93,11 +97,26 @@ export function CapturePage() {
         </div>
       ) : (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 16 }}>
+          {/* Item hint */}
+          <div>
+            <input
+              className="field-input"
+              style={{ fontSize: 16 }}
+              placeholder="What is this? (e.g. 'Funko Pop Spider-Man #1')"
+              value={itemHint}
+              onChange={(e) => setItemHint(e.target.value)}
+              disabled={uploading}
+            />
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4, paddingLeft: 2 }}>
+              Optional hint — helps the AI identify the item
+            </div>
+          </div>
+
           {/* Label */}
           <input
             className="field-input"
             style={{ fontSize: 16 }}
-            placeholder="Optional label (e.g. 'Lot 42')"
+            placeholder="Internal label (e.g. 'Lot 42')"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             disabled={uploading}

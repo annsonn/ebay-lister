@@ -95,6 +95,7 @@ class Batch(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
     profile_id: Mapped[str] = mapped_column(String, nullable=False)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
+    item_hint: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="queued")
     step: Mapped[str | None] = mapped_column(String, nullable=True)
     photo_count: Mapped[int] = mapped_column(Integer, default=0)

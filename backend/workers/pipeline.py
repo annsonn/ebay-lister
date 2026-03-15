@@ -144,19 +144,14 @@ def default_shipping(profile: Profile) -> dict:
 
 async def research_prices(profile: Profile, extracted: dict) -> dict:
     query = build_price_query(profile, extracted)
-    app_id = settings.EBAY_APP_ID
-    secret = settings.EBAY_CLIENT_SECRET
+    try:
+        prices = await scrape_ebay_sold(query)
+        if prices:
+            return prices
+    except Exception as e:
+        logger.warning(f"eBay price scrape failed: {e}")
 
-    if app_id and secret:
-        try:
-            token = await get_ebay_token(app_id, secret)
-            prices = await ebay_search_prices(token, query, profile.ebay_category_id)
-            if prices:
-                return prices
-        except Exception as e:
-            logger.warning(f"eBay price research failed: {e}")
-
-    # Fallback: randomised prices
+    # Fallback: randomised placeholder
     avg = round(random.uniform(10, 35), 2)
     low = round(avg * 0.75, 2)
     high = round(avg * 1.35, 2)
@@ -169,59 +164,71 @@ async def research_prices(profile: Profile, extracted: dict) -> dict:
     }
 
 
-async def get_ebay_token(app_id: str, secret: str) -> str:
-    import base64 as b64mod
-    credentials = b64mod.b64encode(f"{app_id}:{secret}".encode()).decode()
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            "https://api.ebay.com/identity/v1/oauth2/token",
-            headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/x-www-form-urlencoded"},
-            data={"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope"},
-        )
+async def scrape_ebay_sold(query: str) -> dict | None:
+    from bs4 import BeautifulSoup
+
+    params = {
+        "_nkw": query,
+        "LH_Complete": "1",
+        "LH_Sold": "1",
+        "_sacat": "0",
+        "_ipg": "60",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        r = await client.get("https://www.ebay.com/sch/i.html", params=params, headers=headers)
         r.raise_for_status()
-        return r.json()["access_token"]
 
-
-async def ebay_search_prices(token: str, query: str, category_id: str) -> dict | None:
-    params = {"q": query, "limit": "20", "filter": "conditionIds:{1000|3000}"}
-    if category_id:
-        params["category_ids"] = category_id
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(
-            "https://api.ebay.com/buy/browse/v1/item_summary/search",
-            params=params,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        r.raise_for_status()
-        items = r.json().get("itemSummaries", [])
-
+    soup = BeautifulSoup(r.text, "html.parser")
     prices = []
-    for item in items:
-        try:
-            prices.append(float(item["price"]["value"]))
-        except (KeyError, ValueError):
-            pass
 
-    if not prices:
+    for item in soup.select(".s-item"):
+        price_el = item.select_one(".s-item__price")
+        if not price_el:
+            continue
+        # Skip "to" price ranges — take the first number only
+        raw = price_el.get_text(strip=True)
+        # Extract all dollar amounts from the string (handles "CA $12.34" and "$12.34 to $15.00")
+        found = re.findall(r"[\d,]+\.\d{2}", raw.replace(",", ""))
+        for f in found:
+            try:
+                prices.append(float(f))
+                break  # one price per item
+            except ValueError:
+                pass
+
+    if len(prices) < 2:
         return None
 
-    avg = sum(prices) / len(prices)
+    prices.sort()
+    # Trim top/bottom 10% to reduce outlier noise
+    trim = max(1, len(prices) // 10)
+    trimmed = prices[trim:-trim] if len(prices) > trim * 2 else prices
+
+    avg = sum(trimmed) / len(trimmed)
+    sold_count = len(prices)
     return {
-        "price_low": round(min(prices), 2),
+        "price_low": round(min(trimmed), 2),
         "price_avg": round(avg, 2),
-        "price_high": round(max(prices), 2),
-        "recent_sales": len(prices),
-        "sell_through": 70,
+        "price_high": round(max(trimmed), 2),
+        "recent_sales": sold_count,
+        "sell_through": min(95, 40 + sold_count),  # rough heuristic
     }
 
 
-async def run_pipeline_ocr_struct(profile: Profile, images_b64: list[str]) -> tuple[str, dict]:
+
+async def run_pipeline_ocr_struct(profile: Profile, images_b64: list[str], item_hint: str | None = None) -> tuple[str, dict]:
     """Run pass-1 OCR and pass-2 struct. Returns (ocr_text, extracted_data)."""
     ocr_images = images_b64[:3]
-    ocr_text = await ollama_vision(ocr_images, profile.prompt_ocr)
+    hint_prefix = f"The user says this item is: {item_hint}\n\n" if item_hint else ""
+    ocr_text = await ollama_vision(ocr_images, hint_prefix + profile.prompt_ocr)
 
     json_schema = build_json_schema(profile.prompt_fields or [])
-    struct_prompt = f"""{profile.prompt_struct}
+    struct_prompt = f"""{hint_prefix}{profile.prompt_struct}
 
 Extracted text from the photos:
 {ocr_text}
@@ -282,7 +289,7 @@ async def run_pipeline(batch_id: str, profile_id: str):
             await session.commit()
             await manager.send_batch_update(batch_id, "processing", step="Identifying with vision model…")
 
-            _, extracted = await run_pipeline_ocr_struct(profile, images_b64)
+            _, extracted = await run_pipeline_ocr_struct(profile, images_b64, item_hint=batch.item_hint)
 
             # Stage 3: Cross-reference
             batch.step = "Cross-referencing database…"

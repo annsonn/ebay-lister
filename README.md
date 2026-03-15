@@ -38,13 +38,13 @@ Take photos → submit
 
 ## Requirements
 
-- **Docker** and **Docker Compose** (v2)
-- **Ollama** running separately with the `qwen2.5vl:7b` model pulled (see [Ollama Setup](#ollama-setup))
-- Network access from eBay's servers to your machine (for photo URLs in CSV) — see [Photo URL Access](#photo-url-access)
+- **Docker Desktop** for Windows — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
+- **Ollama** running on your Unraid server with `qwen2.5vl:7b` pulled
+- Photos are stored locally — no public hosting needed to use the app
 
 ---
 
-## Quick Start
+## Quick Start (local desktop via Docker)
 
 ### 1. Clone the repo
 
@@ -53,85 +53,105 @@ git clone https://github.com/yourname/ebay-lister.git
 cd ebay-lister
 ```
 
-### 2. Configure environment
+### 2. Create `.env`
+
+Create a `.env` file in the project root:
 
 ```bash
-cp .env.example .env
-```
+# Point at Ollama on your Unraid server
+OLLAMA_HOST=http://192.168.1.x:11434
+OLLAMA_MODEL=qwen2.5vl:7b
 
-Edit `.env`:
-
-```bash
-# Your server's local IP (for accessing the app)
-SERVER_BASE_URL=http://192.168.1.100:8000
-
-# Paths where photos and the database will be stored
+# Local paths for photos and database (created automatically)
 NAS_PHOTOS_PATH=./data/photos
 NAS_DB_PATH=./data/db
 
-# Optional: eBay API keys for live price research
-EBAY_APP_ID=
-EBAY_CLIENT_SECRET=
+# Photo hosting — leave blank for now, set when ready to publish listings
+# SERVER_BASE_URL=https://your-tunnel.example.com
 ```
 
-### 3. Start the stack
+Replace `192.168.1.x` with your Unraid server's LAN IP.
+
+### 3. Build and start
 
 ```bash
-docker compose up -d
+docker compose up --build
 ```
 
-This starts two services:
-| Service | Port | Description |
-|---------|------|-------------|
-| `frontend` | 3000 | React web app (nginx) |
+First build takes a few minutes. After that, `docker compose up` starts in seconds.
+
+This starts two containers:
+| Container | Port | Description |
+|-----------|------|-------------|
 | `backend` | 8000 | FastAPI + AI pipeline |
+| `frontend` | 3000 | React app (nginx) |
 
 ### 4. Open the app
 
 | Interface | URL | Device |
 |-----------|-----|--------|
-| Capture (take photos) | `http://YOUR_IP:3000/capture` | Phone |
-| Dashboard (review queue) | `http://YOUR_IP:3000/dashboard` | Desktop |
-| Settings | `http://YOUR_IP:3000/settings` | Desktop |
-| API docs | `http://YOUR_IP:8000/docs` | Dev |
+| Dashboard | `http://localhost:3000/dashboard` | Desktop |
+| Capture | `http://localhost:3000/capture` | Desktop or phone (use your LAN IP) |
+| Settings | `http://localhost:3000/settings` | Desktop |
+| API docs | `http://localhost:8000/docs` | Dev |
 
 On first load, `/` auto-redirects: mobile → `/capture`, desktop → `/dashboard`.
 
-**iPhone shortcut:** In Safari → Share → "Add to Home Screen" → name it "EbayLister". Opens full-screen like an app.
+**iPhone shortcut:** Open `http://YOUR_DESKTOP_IP:3000/capture` in Safari → Share → "Add to Home Screen". Opens full-screen like an app.
+
+### 5. Stopping and restarting
+
+```bash
+# Stop
+docker compose down
+
+# Start again (no rebuild needed)
+docker compose up
+
+# Rebuild after code changes
+docker compose up --build
+```
 
 ---
 
 ## Ollama Setup
 
-EbayLister expects Ollama to already be running. It connects to it over HTTP.
+EbayLister connects to your existing Ollama instance over HTTP — it does not run its own.
 
 ### Pull the vision model
 
-Run this once on your Ollama host (~5.5 GB download):
+Run this once on your Unraid server (~5.5 GB download):
 
 ```bash
+# In a Unraid terminal or SSH session
 ollama pull qwen2.5vl:7b
 ```
 
-### Pointing the backend at your Ollama
-
-By default the backend uses `http://host.docker.internal:11434`, which resolves to the host machine from inside Docker. This works on **Docker Desktop** (Mac/Windows) and on **Linux with Docker Engine** (the `extra_hosts` entry in `docker-compose.yml` handles it).
-
-If your Ollama runs on a different machine, set `OLLAMA_HOST` in `.env`:
+Or via the Ollama Docker container on Unraid:
 
 ```bash
-OLLAMA_HOST=http://192.168.1.50:11434
+docker exec <ollama-container-name> ollama pull qwen2.5vl:7b
 ```
 
-You can also change it at runtime in the app at `/settings → General → Ollama Host` without restarting Docker.
+### Pointing the backend at Unraid Ollama
 
-### Verify the connection
+Set `OLLAMA_HOST` in your `.env` to your Unraid server's LAN IP:
 
 ```bash
-curl http://localhost:11434/api/tags
+OLLAMA_HOST=http://192.168.1.x:11434
 ```
 
-You should see a JSON list of your pulled models. If the backend can't reach Ollama, pipeline jobs will fail with a connection error visible in the dashboard.
+You can also update it at runtime without restarting Docker: open `/settings → General → Ollama Host`.
+
+### Verify Ollama is reachable
+
+From your desktop, run:
+
+```bash
+curl http://192.168.1.x:11434/api/tags
+```
+
+You should get a JSON list of pulled models. If this fails, check that Ollama's Docker container on Unraid has port 11434 published to the host.
 
 ---
 
@@ -151,8 +171,7 @@ You should see a JSON list of your pulled models. If the backend can't reach Oll
    ```bash
    NAS_PHOTOS_PATH=/mnt/user/appdata/ebaylister/photos
    NAS_DB_PATH=/mnt/user/appdata/ebaylister/db
-   SERVER_BASE_URL=http://192.168.1.YOUR_IP:8000
-   # Point at your existing Ollama — use the host's LAN IP from inside Docker
+   # Point at your Ollama — use the server's LAN IP from inside Docker
    OLLAMA_HOST=http://192.168.1.YOUR_IP:11434
    ```
 4. Start:
@@ -162,22 +181,6 @@ You should see a JSON list of your pulled models. If the backend can't reach Oll
    ```
 
 > **Note:** On Unraid, `host.docker.internal` may not resolve automatically. Use your server's actual LAN IP for `OLLAMA_HOST` instead.
-
----
-
-## Photo URL Access
-
-eBay's servers need to fetch your photos when you import the CSV. Your backend (port 8000) must be reachable from the internet.
-
-**Options (pick one):**
-
-| Method | Difficulty | Notes |
-|--------|-----------|-------|
-| Port-forward | Easy | Forward port 8000 on your router to your server. Set `SERVER_BASE_URL=http://YOUR_PUBLIC_IP:8000` |
-| Cloudflare Tunnel | Recommended | No open ports. Install `cloudflared`, create a tunnel → `localhost:8000`. Set `SERVER_BASE_URL=https://your-tunnel.trycloudflare.com` |
-| Tailscale | Easy (if using it) | Works if you upload from a device on your Tailnet. Use your Tailscale IP. |
-
-Set `SERVER_BASE_URL` in `.env` (or the Settings page in the app) to match.
 
 ---
 
@@ -222,13 +225,11 @@ If the AI got it wrong, correct the identification fields and click **⟳ Re-run
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NAS_PHOTOS_PATH` | `./data/photos` | Where uploaded photos are stored |
-| `NAS_DB_PATH` | `./data/db` | Where the SQLite database lives |
-| `OLLAMA_HOST` | `http://host.docker.internal:11434` | URL of your existing Ollama instance |
+| `OLLAMA_HOST` | `http://host.docker.internal:11434` | URL of your Ollama instance |
 | `OLLAMA_MODEL` | `qwen2.5vl:7b` | Ollama vision model to use |
-| `SERVER_BASE_URL` | `http://localhost:8000` | Public URL for photo links in CSV |
-| `EBAY_APP_ID` | *(empty)* | eBay Browse API app ID (enables live pricing) |
-| `EBAY_CLIENT_SECRET` | *(empty)* | eBay Browse API secret |
+| `NAS_PHOTOS_PATH` | `./data/photos` | Where uploaded photos are stored on the host |
+| `NAS_DB_PATH` | `./data/db` | Where the SQLite database lives on the host |
+| `SERVER_BASE_URL` | *(blank)* | Public URL for photo links in CSV — leave unset until ready to publish |
 
 ### In-app settings (`/settings → General`)
 
@@ -264,42 +265,46 @@ Built-in profiles cannot be deleted but can be duplicated and customised.
 
 ### eBay price research
 
-If `EBAY_APP_ID` and `EBAY_CLIENT_SECRET` are set, the pipeline calls the eBay Browse API to fetch recent sold prices. Without keys, prices are a randomised placeholder ($10–$35) — you'll want to adjust them manually before approving.
+The pipeline automatically scrapes eBay's public sold listings page for recent prices — no API key required. It searches for your item by interpolating the profile's **Price Search Template** with the extracted field values, then parses the sold prices and returns a trimmed average.
 
-Get free API credentials at [developer.ebay.com](https://developer.ebay.com/).
+If the scrape returns no results (e.g. very obscure item or network issue), prices fall back to a randomised placeholder ($10–$35) that you can adjust manually before approving.
+
+`EBAY_APP_ID` / `EBAY_CLIENT_SECRET` in `.env` are no longer used and can be left empty.
 
 ---
 
 ## Development
 
-### Backend only
+For active development with hot reload, run the backend and frontend directly instead of through Docker.
+
+### Backend (hot reload)
 
 ```bash
+source ~/venv312/Scripts/activate
 cd backend
 pip install -r requirements.txt
-# Needs a running Ollama (or set OLLAMA_HOST to point elsewhere)
 uvicorn main:app --reload
 ```
 
-API docs available at `http://localhost:8000/docs`.
+The backend reads `backend/.env` automatically. API docs at `http://localhost:8000/docs`.
 
-### Frontend only
+### Frontend (hot reload)
 
 ```bash
 cd frontend
 npm install
-npm run dev   # proxies /api → localhost:8000
+npm run dev
 ```
 
-### Full stack (local, no Docker)
+Open `http://localhost:5173`. Vite proxies `/api` and `/ws` to `localhost:8000` automatically — no CORS config needed.
 
-Run Ollama natively, then start backend and frontend as above.
-
-### Full stack (Docker)
+### Docker (production-like)
 
 ```bash
 docker compose up --build
 ```
+
+Open `http://localhost:3000`.
 
 ---
 

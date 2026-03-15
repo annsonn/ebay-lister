@@ -73,6 +73,7 @@ def batch_to_dict(batch: Batch, include_listing=False, include_photos=False) -> 
     d = {
         "id": batch.id,
         "label": batch.label,
+        "item_hint": batch.item_hint,
         "profile": {
             "id": batch.profile.id,
             "name": batch.profile.name,
@@ -114,6 +115,7 @@ def batch_to_dict(batch: Batch, include_listing=False, include_photos=False) -> 
 async def create_batch(
     background_tasks: BackgroundTasks,
     label: Optional[str] = None,
+    item_hint: Optional[str] = None,
     profile_id: Optional[str] = None,
     photos: list[UploadFile] = [],
     db: AsyncSession = Depends(get_db),
@@ -147,6 +149,7 @@ async def create_batch(
         id=batch_id,
         profile_id=profile.id,
         label=label,
+        item_hint=item_hint or None,
         status="queued",
         photo_count=len(photos),
     )
@@ -343,7 +346,10 @@ async def export_csv(db: AsyncSession = Depends(get_db)):
     # Get server base URL from settings
     srv_result = await db.execute(select(Setting).where(Setting.key == "server_base_url"))
     srv_setting = srv_result.scalar_one_or_none()
-    base_url = srv_setting.value if srv_setting else settings.SERVER_BASE_URL
+    _raw_url = (srv_setting.value if srv_setting else None) or settings.SERVER_BASE_URL
+    # Only embed photo URLs if a real public base URL is configured
+    _is_public = _raw_url and not _raw_url.startswith("http://localhost") and not _raw_url.startswith("http://127.")
+    base_url = _raw_url if _is_public else ""
 
     # Collect all dynamic C: columns across profiles
     dynamic_cols: list[str] = []
@@ -377,7 +383,7 @@ async def export_csv(db: AsyncSession = Depends(get_db)):
 
         # Build photo URL from first photo
         photo_url = ""
-        if batch and batch.photos:
+        if base_url and batch and batch.photos:
             photo_url = f"{base_url}/api/photos/{batch.photos[0].filename}"
 
         row = {
