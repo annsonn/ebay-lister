@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint, event, text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -93,7 +93,7 @@ class Batch(Base):
     __tablename__ = "batches"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
-    profile_id: Mapped[str] = mapped_column(String, nullable=False)
+    profile_id: Mapped[str] = mapped_column(String, ForeignKey("profiles.id"), nullable=False)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
     item_hint: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="queued")
@@ -110,8 +110,8 @@ class Listing(Base):
     __tablename__ = "listings"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
-    batch_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    profile_id: Mapped[str] = mapped_column(String, nullable=False)
+    batch_id: Mapped[str] = mapped_column(String, ForeignKey("batches.id"), unique=True, nullable=False)
+    profile_id: Mapped[str] = mapped_column(String, ForeignKey("profiles.id"), nullable=False)
     status: Mapped[str] = mapped_column(String, default="pending")
     step: Mapped[str | None] = mapped_column(String, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -155,7 +155,7 @@ class Photo(Base):
     __tablename__ = "photos"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
-    batch_id: Mapped[str] = mapped_column(String, nullable=False)
+    batch_id: Mapped[str] = mapped_column(String, ForeignKey("batches.id"), nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     original_name: Mapped[str] = mapped_column(String, default="")
     order: Mapped[int] = mapped_column(Integer, default=0)
