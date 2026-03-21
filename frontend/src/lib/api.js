@@ -90,6 +90,14 @@ export const api = {
   exportCSV: () => window.open(`${BASE}/api/export/csv`, '_blank'),
 
   photoUrl: (filename) => `${BASE}/api/photos/${filename}`,
+
+  getEbaySession: () => request('/api/ebay/session'),
+
+  connectEbayAccount: () =>
+    request('/api/ebay/login', { method: 'POST' }),
+
+  submitToEbay: (id) =>
+    request(`/api/listings/${id}/submit-to-ebay`, { method: 'POST' }),
 }
 
 export function createWS(onMessage) {

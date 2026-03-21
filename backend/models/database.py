@@ -147,6 +147,10 @@ class Listing(Base):
     pkg_width_cm: Mapped[int] = mapped_column(Integer, default=17)
     pkg_depth_cm: Mapped[int] = mapped_column(Integer, default=12)
 
+    ebay_submit_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    # values: None | "submitting" | "draft" | "error"
+    ebay_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
     batch: Mapped["Batch"] = relationship("Batch", back_populates="listing")
     profile: Mapped["Profile"] = relationship("Profile", back_populates="listings")
 
@@ -199,5 +203,14 @@ async def init_db():
     os.makedirs(db_dir, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Additive migrations for columns added after initial schema
+        for col, coldef in [
+            ("ebay_submit_status", "TEXT"),
+            ("ebay_url", "TEXT"),
+        ]:
+            try:
+                await conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col} {coldef}"))
+            except Exception:
+                pass  # column already exists
     async with SessionLocal() as session:
         await seed_profiles(session)
