@@ -19,6 +19,8 @@ export function SettingsPage() {
   const [toast, setToast] = useState(null)
   const [saving, setSaving] = useState(false)
   const [lastBatchId, setLastBatchId] = useState(null)
+  const [ebaySession, setEbaySession] = useState(null)      // {logged_in, username}
+  const [ebayConnecting, setEbayConnecting] = useState(false)
 
   async function loadProfiles() {
     const ps = await api.listProfiles()
@@ -29,11 +31,33 @@ export function SettingsPage() {
     loadProfiles().catch(console.error)
     api.getSettings().then(setSettings).catch(console.error)
     api.getOllamaModels().then((r) => setOllamaModels(r.models || [])).catch(console.error)
+    api.getEbaySession().then(setEbaySession).catch(console.error)
     // Get last batch id for prompt testing
     api.listBatches().then((bs) => {
       if (bs.length > 0) setLastBatchId(bs[0].id)
     }).catch(console.error)
   }, [])
+
+  async function connectEbay() {
+    setEbayConnecting(true)
+    try {
+      const result = await api.connectEbayAccount()
+      if (result.success) {
+        setEbaySession({ logged_in: true, username: result.username })
+        setToast({ message: `Connected to eBay${result.username ? ` as ${result.username}` : ''}`, type: 'success' })
+      } else {
+        setToast({ message: result.error || 'eBay login failed', type: 'error' })
+      }
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' })
+    } finally {
+      setEbayConnecting(false)
+    }
+  }
+
+  async function refreshEbaySession() {
+    api.getEbaySession().then(setEbaySession).catch(console.error)
+  }
 
   function selectProfile(p) {
     setSelectedProfileId(p.id)
@@ -309,6 +333,53 @@ export function SettingsPage() {
       {tab === 'general' && (
         <div style={{ flex: 1, overflowY: 'auto', padding: 32, maxWidth: 600 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+            {/* eBay Account */}
+            <div className="card">
+              <div className="card-header"><span className="card-title">EBAY ACCOUNT</span></div>
+              <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {ebaySession == null ? (
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Checking session…</span>
+                  ) : ebaySession.logged_in ? (
+                    <>
+                      <span style={{ fontSize: 18 }}>✅</span>
+                      <span style={{ fontSize: 13, color: 'var(--green)' }}>
+                        Connected{ebaySession.username ? ` as ${ebaySession.username}` : ''}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 18 }}>🔴</span>
+                      <span style={{ fontSize: 13, color: 'var(--red)' }}>Not connected</span>
+                    </>
+                  )}
+                  <button
+                    className="btn btn-sm btn-outline"
+                    onClick={refreshEbaySession}
+                    style={{ marginLeft: 'auto' }}
+                    title="Re-check session status"
+                  >
+                    ↻ Refresh
+                  </button>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  Click <strong>Connect</strong> to open a Chromium window where you can log into eBay (including 2FA).
+                  The session is saved and reused automatically for future listings.
+                </div>
+                <button
+                  className="btn btn-gold"
+                  onClick={connectEbay}
+                  disabled={ebayConnecting}
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  {ebayConnecting
+                    ? <><div className="spinner spinner-sm" style={{ borderTopColor: '#000' }} /> Opening browser…</>
+                    : ebaySession?.logged_in ? '↺ Re-connect eBay Account' : '⚡ Connect eBay Account'}
+                </button>
+              </div>
+            </div>
+
             <div className="field">
               <label className="field-label">Ollama Model</label>
               {ollamaModels.length > 0 ? (

@@ -56,6 +56,8 @@ def listing_to_dict(listing: Listing) -> dict:
         "pkg_length_cm": listing.pkg_length_cm,
         "pkg_width_cm": listing.pkg_width_cm,
         "pkg_depth_cm": listing.pkg_depth_cm,
+        "ebay_submit_status": listing.ebay_submit_status,
+        "ebay_url": listing.ebay_url,
     }
 
 
@@ -301,6 +303,98 @@ async def reprocess_listing(
     await db.commit()
     background_tasks.add_task(run_pipeline, batch.id, batch.profile_id)
     return {"status": "processing"}
+
+
+# ── eBay browser automation ───────────────────────────────────────────────────
+
+@router.get("/ebay/session")
+async def ebay_session_status():
+    """Return whether a saved eBay session cookie is still valid."""
+    from workers.ebay_browser import get_session_status
+    return await get_session_status()
+
+
+@router.post("/ebay/login")
+async def ebay_login():
+    """
+    Open a visible Chromium window so the user can log into eBay manually.
+    Blocks until login completes (up to 5 min) then saves session cookies.
+    """
+    from workers.ebay_browser import open_login_browser
+    return await open_login_browser()
+
+
+async def _run_ebay_submit(listing_id: str):
+    """Background task: load listing data, call Playwright automation, persist result."""
+    from sqlalchemy.orm import selectinload
+    from workers.ebay_browser import submit_listing
+
+    async with SessionLocal() as db:
+        result_obj = await db.execute(
+            select(Listing)
+            .where(Listing.id == listing_id)
+            .options(selectinload(Listing.batch))
+        )
+        listing = result_obj.scalar_one_or_none()
+        if not listing:
+            return
+
+        batch = listing.batch
+        # Build absolute photo paths from stored relative filenames
+        photo_paths = []
+        if batch and batch.photos:
+            for photo in sorted(batch.photos, key=lambda p: p.order):
+                full = os.path.join(settings.PHOTOS_DIR, photo.filename)
+                photo_paths.append(full)
+
+        listing_data = listing_to_dict(listing)
+
+        async def on_progress(step: str):
+            await manager.broadcast("ebay_submit_progress", {
+                "listing_id": listing_id,
+                "step": step,
+            })
+
+        result = await submit_listing(listing_data, photo_paths, on_progress=on_progress)
+
+        if result["success"]:
+            listing.ebay_submit_status = "draft"
+            listing.ebay_url = result["draft_url"]
+        else:
+            listing.ebay_submit_status = "error"
+            listing.error = result["error"]
+
+        await db.commit()
+        await manager.broadcast(
+            "ebay_submit_done" if result["success"] else "ebay_submit_error",
+            {
+                "listing_id": listing_id,
+                "draft_url": result.get("draft_url"),
+                "error": result.get("error"),
+            },
+        )
+
+
+@router.post("/listings/{listing_id}/submit-to-ebay")
+async def submit_listing_to_ebay(
+    listing_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger eBay browser automation to pre-fill a draft listing."""
+    listing = await db.get(Listing, listing_id)
+    if not listing:
+        raise HTTPException(404, "Listing not found")
+    if listing.status != "approved":
+        raise HTTPException(400, "Listing must be approved before submitting to eBay")
+    if listing.ebay_submit_status == "submitting":
+        raise HTTPException(409, "Already submitting this listing")
+
+    listing.ebay_submit_status = "submitting"
+    await db.commit()
+    await manager.broadcast("ebay_submit_started", {"listing_id": listing_id})
+    background_tasks.add_task(_run_ebay_submit, listing_id)
+    return {"status": "submitting"}
 
 
 # ── Photos ────────────────────────────────────────────────────────────────────

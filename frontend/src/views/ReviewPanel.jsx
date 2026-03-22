@@ -13,6 +13,8 @@ export function ReviewPanel({ listing: initialListing, photos = [], onApprove, o
   const [activePhoto, setActivePhoto] = useState(0)
   const [toast, setToast] = useState(null)
   const [approving, setApproving] = useState(false)
+  const [ebaySubmitting, setEbaySubmitting] = useState(false)
+  const [ebayDraftUrl, setEbayDraftUrl] = useState(null)
 
   useEffect(() => {
     if (initialListing) {
@@ -63,9 +65,28 @@ export function ReviewPanel({ listing: initialListing, photos = [], onApprove, o
     }
   }
 
+  async function submitToEbay() {
+    setEbaySubmitting(true)
+    setEbayDraftUrl(null)
+    try {
+      await api.submitToEbay(initialListing.id)
+      // Draft URL arrives via WebSocket (ebay_submit_done); poll listing as fallback
+      const updated = await api.getListing(initialListing.id)
+      if (updated.ebay_url) setEbayDraftUrl(updated.ebay_url)
+      setToast({ message: 'eBay draft saved! Click the link to review and publish.', type: 'success' })
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' })
+    } finally {
+      setEbaySubmitting(false)
+    }
+  }
+
   if (!initialListing) return null
   const extracted = fields.extracted_data || {}
   const profileFields = profile?.prompt_fields || []
+  const isApproved = fields.status === 'approved'
+  const existingEbayUrl = fields.ebay_url || ebayDraftUrl
+  const existingEbayStatus = fields.ebay_submit_status
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16 }}>
@@ -208,13 +229,45 @@ export function ReviewPanel({ listing: initialListing, photos = [], onApprove, o
       </div>
 
       {/* Actions */}
-      <div style={{ display: 'flex', gap: 10, paddingTop: 4, paddingBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 10, paddingTop: 4, paddingBottom: 16, flexWrap: 'wrap' }}>
         <button className="btn btn-gold btn-lg" onClick={approve} disabled={approving} style={{ flex: 1 }}>
           {approving ? <><div className="spinner spinner-sm" style={{ borderTopColor: '#000' }} /> Saving…</> : '✓ Approve & Save'}
         </button>
         <button className="btn btn-blue" onClick={reprocess}>⟳ Re-run Research</button>
         <button className="btn btn-outline" onClick={reset} disabled={modified.size === 0}>↺ Reset</button>
+        {isApproved && (
+          <button
+            className="btn btn-green"
+            onClick={submitToEbay}
+            disabled={ebaySubmitting || existingEbayStatus === 'submitting'}
+            title="Open Chromium, fill the eBay listing form, and save a draft"
+          >
+            {(ebaySubmitting || existingEbayStatus === 'submitting')
+              ? <><div className="spinner spinner-sm" /> Submitting…</>
+              : existingEbayUrl ? '✓ Re-list on eBay' : '↑ List on eBay'}
+          </button>
+        )}
       </div>
+
+      {/* eBay draft link */}
+      {existingEbayUrl && (
+        <div style={{ paddingBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>eBay draft:</span>
+          <a
+            href={existingEbayUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 13, color: 'var(--green)', wordBreak: 'break-all' }}
+          >
+            {existingEbayUrl}
+          </a>
+        </div>
+      )}
+      {existingEbayStatus === 'error' && !existingEbayUrl && (
+        <div style={{ paddingBottom: 16, fontSize: 12, color: 'var(--red)' }}>
+          eBay submission failed. Check that Chromium is installed and you are connected (Settings → General).
+        </div>
+      )}
     </div>
   )
 }
